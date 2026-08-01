@@ -1,0 +1,15 @@
+{
+  "name": "snu-archive",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SNU lecture statistics and difficulty archive",
+  "scripts": {
+    "build:courses": "node scripts/build-courses.js",
+    "dev": "node server.js",
+    "smoke": "node scripts/smoke-test.js",
+    "validate": "node scripts/validate.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SNU Archive</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="global-nav">
+      <div class="global-nav-inner">
+        <div class="brand">
+          <strong>SNU Archive</strong>
+        </div>
+        <nav class="view-tabs" id="viewTabs" hidden>
+          <button type="button" data-view="archive" class="active">Archive</button>
+          <button type="button" data-view="admin">Admin</button>
+        </nav>
+        <div class="auth" id="authPanel"></div>
+      </div>
+    </header>
+
+    <main>
+      <section class="signin-tile" id="signinTile">
+        <div class="signin-copy">
+          <h1>SNU Archive</h1>
+          <p>서울대 강의 통계와 난이도를 빠르게 확인하세요.</p>
+          <button class="primary hero-action" type="button" data-auth-trigger>Google로 로그인</button>
+        </div>
+      </section>
+
+      <section class="archive-view" id="archiveView" hidden>
+        <aside class="search-pane" id="searchPane" aria-label="강의 검색">
+          <div class="search-head">
+            <label for="searchInput">강의 검색</label>
+            <button class="icon-button search-toggle" id="searchToggle" type="button" aria-expanded="true" aria-label="강의 검색 접기">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m6 9 6 6 6-6"></path>
+              </svg>
+              <span class="sr-only">접기</span>
+            </button>
+          </div>
+          <div class="search-content" id="searchContent">
+            <input
+              id="searchInput"
+              class="search-input"
+              type="search"
+              autocomplete="off"
+              placeholder="강의명, 교수명, 학과"
+              disabled
+            />
+            <div class="result-list" id="resultList"></div>
+          </div>
+        </aside>
+
+        <section class="detail-pane" aria-live="polite">
+          <article class="course-detail" id="courseDetail" hidden>
+            <header class="detail-header">
+              <div>
+                <p id="courseMeta"></p>
+                <h1 id="courseTitle"></h1>
+              </div>
+              <div class="detail-actions">
+                <button class="icon-button favorite-button" id="favoriteButton" type="button" aria-pressed="false" title="즐겨찾기">☆</button>
+                <button class="icon-button" id="refreshButton" type="button" title="새로고침">↻</button>
+              </div>
+            </header>
+
+            <section class="section-block poll-section" id="pollSection">
+              <div class="section-title">
+                <h2>난이도 투표</h2>
+                <span id="voteQuota">0/10</span>
+              </div>
+              <div class="poll-box" id="pollBox"></div>
+            </section>
+
+            <section class="section-block stats-section" id="statsSection">
+              <div class="section-title">
+                <h2>통계량</h2>
+                <span id="statsCount">0건</span>
+              </div>
+              <div class="stats-table-wrap">
+                <table class="stats-table">
+                  <thead>
+                    <tr>
+                      <th>시험</th>
+                      <th>연도/학기</th>
+                      <th>Q1</th>
+                      <th>Q2</th>
+                      <th>Q3</th>
+                      <th>Q4</th>
+                      <th>평균</th>
+                      <th>만점</th>
+                      <th>제보자</th>
+                      <th>비고</th>
+                    </tr>
+                  </thead>
+                  <tbody id="statsBody"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="report-grid" id="reportsSection">
+              <form class="section-block report-form collapsed" id="directForm" data-report-card>
+                <div class="section-title report-title">
+                  <div>
+                    <h2>직접 제보</h2>
+                    <span>비어 있는 값은 저장하지 않습니다</span>
+                  </div>
+                  <button class="icon-button report-toggle" type="button" data-report-toggle aria-expanded="false" aria-label="직접 제보 펼치기">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m6 9 6 6 6-6"></path>
+                    </svg>
+                    <span class="sr-only">펼치기</span>
+                  </button>
+                </div>
+                <div class="report-body" aria-hidden="true">
+                  <div class="report-topline">
+                    <label>
+                      닉네임
+                      <input name="nickname" maxlength="10" placeholder="(익명)" />
+                    </label>
+                    <label>
+                      시험 형태
+                      <select name="assessmentLabel">
+                        <option value="중간">중간</option>
+                        <option value="기말">기말</option>
+                        <option value="1차">1차</option>
+                        <option value="2차">2차</option>
+                        <option value="3차">3차</option>
+                        <option value="퀴즈">퀴즈</option>
+                        <option value="과제">과제</option>
+                        <option value="기타">기타</option>
+                        <option value="__custom">직접 입력</option>
+                      </select>
+                    </label>
+                    <label class="custom-assessment-wrap" hidden>
+                      직접 입력
+                      <input class="custom-assessment" name="customAssessment" placeholder="예: 실습시험" disabled />
+                    </label>
+                  </div>
+                  <div class="term-selects">
+                    <label>
+                      연도
+                      <select name="year"></select>
+                    </label>
+                    <label>
+                      학기
+                      <select name="semester"></select>
+                    </label>
+                  </div>
+                  <div class="score-strip">
+                    <label>Q1<input name="q1" type="number" min="0" step="any" inputmode="decimal" data-number-input /></label>
+                    <label>Q2<input name="q2" type="number" min="0" step="any" inputmode="decimal" data-number-input /></label>
+                    <label>Q3<input name="q3" type="number" min="0" step="any" inputmode="decimal" data-number-input /></label>
+                    <label>Q4<input name="q4" type="number" min="0" step="any" inputmode="decimal" data-number-input /></label>
+                    <label>평균<input name="average" type="number" min="0" step="any" inputmode="decimal" data-number-input /></label>
+                    <label>만점<input name="maxScore" type="number" min="0" step="any" inputmode="decimal" data-number-input /></label>
+                  </div>
+                  <div class="submit-row">
+                    <label class="note-field">비고<textarea name="note" rows="2"></textarea></label>
+                    <button class="primary" type="submit" disabled>등록</button>
+                  </div>
+                </div>
+              </form>
+
+              <form class="section-block quick-form collapsed" id="quickForm" data-report-card>
+                <div class="section-title report-title">
+                  <div>
+                    <h2>간편 제보</h2>
+                    <span>관리자 확인 후 반영됩니다</span>
+                  </div>
+                  <button class="icon-button report-toggle" type="button" data-report-toggle aria-expanded="false" aria-label="간편 제보 펼치기">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m6 9 6 6 6-6"></path>
+                    </svg>
+                    <span class="sr-only">펼치기</span>
+                  </button>
+                </div>
+                <div class="report-body" aria-hidden="true">
+                  <label>
+                    닉네임
+                    <input name="nickname" maxlength="10" placeholder="(익명)" />
+                  </label>
+                  <label>
+                    시험 형태
+                    <select name="assessmentLabel">
+                      <option value="중간">중간</option>
+                      <option value="기말">기말</option>
+                      <option value="퀴즈">퀴즈</option>
+                      <option value="과제">과제</option>
+                      <option value="기타">기타</option>
+                      <option value="__custom">직접 입력</option>
+                    </select>
+                  </label>
+                  <label class="custom-assessment-wrap" hidden>
+                    직접 입력
+                    <input class="custom-assessment" name="customAssessment" placeholder="예: 2차 퀴즈" disabled />
+                  </label>
+                  <div class="term-selects">
+                    <label>
+                      연도
+                      <select name="year"></select>
+                    </label>
+                    <label>
+                      학기
+                      <select name="semester"></select>
+                    </label>
+                  </div>
+                  <label>
+                    파일
+                    <input name="file" type="file" accept="image/*,.pdf" />
+                  </label>
+                  <button class="primary" type="submit" disabled>업로드</button>
+                </div>
+              </form>
+            </section>
+
+            <section class="section-block admin-section" id="courseAdminSection" hidden>
+              <div class="section-title">
+                <h2>이 과목 제보 큐</h2>
+                <button class="subtle" id="courseAdminRefreshButton" type="button">불러오기</button>
+              </div>
+              <div id="courseAdminReports" class="admin-list"></div>
+            </section>
+          </article>
+        </section>
+      </section>
+
+      <section class="admin-page" id="adminView" hidden>
+        <header class="admin-header">
+          <div>
+            <p>관리자</p>
+            <h1>제보 확인 및 통계량 수정</h1>
+          </div>
+          <div class="admin-header-actions">
+            <div class="admin-tabs" id="adminSubTabs" aria-label="관리자 메뉴">
+              <button type="button" class="active" data-admin-tab="work">제보 관리</button>
+              <button type="button" data-admin-tab="stats">최근 통계량</button>
+              <button type="button" data-admin-tab="logs">로그 보기</button>
+            </div>
+            <button class="primary" id="adminRefreshButton" type="button">새로고침</button>
+          </div>
+        </header>
+        <div class="admin-grid" id="adminWorkPanel">
+          <section class="section-block">
+            <div class="section-title">
+              <h2>간편 제보</h2>
+              <span id="adminReportCount">0건</span>
+            </div>
+            <div id="adminReports" class="admin-list"></div>
+            <button class="subtle admin-more" id="adminReportsMore" type="button">더 보기</button>
+          </section>
+        </div>
+        <section class="section-block admin-stats-panel" id="adminStatsPanel" hidden>
+          <div class="section-title">
+            <h2>최근 통계량</h2>
+            <span id="adminStatsCount">0건</span>
+          </div>
+          <div id="adminStatsList" class="admin-list"></div>
+          <button class="subtle admin-more" id="adminStatsMore" type="button">더 보기</button>
+        </section>
+        <section class="section-block admin-log-panel" id="adminLogPanel" hidden>
+          <div class="section-title">
+            <h2>로그 보기</h2>
+            <span id="adminLogCount">0건</span>
+          </div>
+          <div class="admin-log-actions">
+            <button class="subtle" id="adminLogsExport" type="button">JSON으로 내보내기</button>
+            <button class="danger" id="adminLogsClear" type="button">비우기</button>
+          </div>
+          <div id="adminLogs" class="admin-list"></div>
+          <button class="subtle admin-more" id="adminLogsMore" type="button">더 보기</button>
+        </section>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
