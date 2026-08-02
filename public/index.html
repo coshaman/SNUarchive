@@ -216,6 +216,26 @@
               </form>
             </section>
 
+            <section class="section-block comments-section" id="commentsSection">
+              <div class="section-title">
+                <h2>한줄 후기</h2>
+                <span id="commentsCount">0건</span>
+              </div>
+              <form class="comment-form" id="commentForm">
+                <input
+                  id="commentInput"
+                  name="body"
+                  type="text"
+                  maxlength="50"
+                  placeholder="이 강의에 대한 한줄 후기 (이름은 가려서 표시돼요)"
+                  autocomplete="off"
+                />
+                <span class="comment-counter" id="commentCounter">0/50</span>
+                <button class="primary" type="submit" disabled>등록</button>
+              </form>
+              <div id="commentsList" class="comments-list"></div>
+            </section>
+
             <section class="section-block admin-section" id="courseAdminSection" hidden>
               <div class="section-title">
                 <h2>이 과목 제보 큐</h2>

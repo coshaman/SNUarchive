@@ -64,7 +64,6 @@ for (const file of files) {
     const existing =
       byCourse.get(key) ||
       {
-        id: key,
         course_key: key,
         title: course.title,
         instructor: course.instructor,

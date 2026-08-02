@@ -603,8 +603,12 @@ main {
   order: 3;
 }
 
-.admin-section {
+.comments-section {
   order: 4;
+}
+
+.admin-section {
+  order: 5;
 }
 
 .stats-table-wrap {
@@ -1100,6 +1104,59 @@ main {
 .admin-more {
   justify-self: center;
   min-width: 128px;
+}
+
+.comment-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.comment-form input {
+  flex: 1;
+}
+
+.comment-counter {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.comments-list {
+  display: grid;
+  gap: 8px;
+}
+
+.comment-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--background-raised);
+  font-size: 14px;
+}
+
+.comment-name {
+  flex: none;
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.comment-body {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  overflow-wrap: break-word;
+}
+
+.comment-item time {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .empty-small {

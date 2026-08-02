@@ -25,6 +25,7 @@ const state = {
   stats: [],
   poll: null,
   pollAssessment: "",
+  comments: [],
   selectedRating: null,
   activity: {
     recentStats: {},
@@ -71,6 +72,11 @@ function cacheElements() {
     quickForm: $("#quickForm"),
     voteQuota: $("#voteQuota"),
     pollBox: $("#pollBox"),
+    commentForm: $("#commentForm"),
+    commentInput: $("#commentInput"),
+    commentCounter: $("#commentCounter"),
+    commentsCount: $("#commentsCount"),
+    commentsList: $("#commentsList"),
     courseAdminSection: $("#courseAdminSection"),
     courseAdminReports: $("#courseAdminReports"),
     courseAdminRefreshButton: $("#courseAdminRefreshButton"),
@@ -380,9 +386,7 @@ function matchingCourses() {
   return results;
 }
 
-function filteredCourses() {
-  return matchingCourses().slice(0, state.courseVisibleCount);
-}
+let lastMatchedCourses = [];
 
 function resetCoursePagination() {
   state.courseVisibleCount = COURSE_BATCH_SIZE;
@@ -390,7 +394,7 @@ function resetCoursePagination() {
 
 function maybeLoadMoreCourses() {
   if (!state.user || !els.resultList) return;
-  const total = matchingCourses().length;
+  const total = lastMatchedCourses.length;
   if (state.courseVisibleCount >= total) return;
   const remaining = els.resultList.scrollHeight - els.resultList.scrollTop - els.resultList.clientHeight;
   if (remaining > 180) return;
@@ -400,8 +404,9 @@ function maybeLoadMoreCourses() {
 
 function renderSearch(options = {}) {
   const previousScroll = options.preserveScroll ? els.resultList.scrollTop : 0;
-  const totalResults = matchingCourses();
-  const results = filteredCourses();
+  lastMatchedCourses = matchingCourses();
+  const totalResults = lastMatchedCourses;
+  const results = totalResults.slice(0, state.courseVisibleCount);
 
   if (!state.user) {
     els.resultList.innerHTML = "";
@@ -425,7 +430,7 @@ function renderSearch(options = {}) {
 
       return `
         <article class="result-item ${state.selected?.course_key === course.course_key ? "active" : ""}">
-          <button class="result-main" type="button" data-course-id="${escapeHtml(course.id)}">
+          <button class="result-main" type="button" data-course-id="${escapeHtml(course.course_key)}">
             <span class="result-title-line">
               <strong>${escapeHtml(course.title)}</strong>
             </span>
@@ -435,7 +440,7 @@ function renderSearch(options = {}) {
           <button
             class="favorite-inline"
             type="button"
-            data-favorite-course-id="${escapeHtml(course.id)}"
+            data-favorite-course-id="${escapeHtml(course.course_key)}"
             aria-pressed="${favoriteCourse(course) ? "true" : "false"}"
             title="즐겨찾기"
           >${favoriteCourse(course) ? "★" : "☆"}</button>
@@ -460,7 +465,7 @@ function coursePayload(course = state.selected, form = null) {
   if (!course) return null;
   const term = reportTermValue(form);
   return {
-    id: course.id || course.course_key,
+    id: course.course_key,
     course_key: course.course_key,
     title: course.title,
     instructor: course.instructor,
@@ -484,7 +489,7 @@ function setSearchCollapsed(collapsed) {
 }
 
 async function selectCourse(id) {
-  const course = state.courses.find((item) => item.id === id || item.course_key === id);
+  const course = state.courses.find((item) => item.course_key === id);
   if (!course) return;
   state.selected = course;
   state.selectedRating = null;
@@ -503,9 +508,9 @@ async function restoreLastSelectedCourse() {
   if (!state.user || state.selected) return;
   const courseKey = storageGet(SELECTED_COURSE_KEY);
   if (!courseKey) return;
-  const course = state.courses.find((item) => item.course_key === courseKey || item.id === courseKey);
+  const course = state.courses.find((item) => item.course_key === courseKey);
   if (!course) return;
-  await selectCourse(course.id);
+  await selectCourse(course.course_key);
 }
 
 async function toggleFavorite(course) {
@@ -542,22 +547,24 @@ async function loadDetail() {
   els.courseMeta.textContent = `${state.selected.instructor} · ${departmentsText(state.selected)}`;
   els.statsBody.innerHTML = `<tr><td colspan="10">불러오는 중</td></tr>`;
   els.pollBox.innerHTML = `<div class="empty-small">불러오는 중</div>`;
+  els.commentsList.innerHTML = `<div class="empty-small">불러오는 중</div>`;
 
   try {
     const pollAssessment = state.pollAssessment || defaultAssessmentByDate();
-    const statsPromise = request(`/api/stats?courseKey=${encodeURIComponent(state.selected.course_key)}`);
-    let pollResponse = await request(`/api/polls?courseKey=${encodeURIComponent(state.selected.course_key)}`);
-    if (!pollResponse.active) {
-      pollResponse = await request(
-        `/api/polls?courseKey=${encodeURIComponent(state.selected.course_key)}&assessmentLabel=${encodeURIComponent(pollAssessment)}`
-      );
-    }
-    const statsResponse = await statsPromise;
+    const [statsResponse, pollResponse, commentsResponse] = await Promise.all([
+      request(`/api/stats?courseKey=${encodeURIComponent(state.selected.course_key)}`),
+      request(
+        `/api/polls?courseKey=${encodeURIComponent(state.selected.course_key)}&preferredAssessmentLabel=${encodeURIComponent(pollAssessment)}`
+      ),
+      request(`/api/comments?courseKey=${encodeURIComponent(state.selected.course_key)}`)
+    ]);
     state.stats = statsResponse.stats || [];
     state.poll = pollResponse;
     state.pollAssessment = pollResponse.assessmentLabel || pollAssessment;
+    state.comments = commentsResponse.comments || [];
     renderStats();
     renderPoll();
+    renderComments();
     renderFavoriteButton();
     await renderCourseAdminSection();
   } catch (error) {
@@ -664,6 +671,52 @@ function renderStats() {
     .join("");
 }
 
+function renderComments() {
+  els.commentsCount.textContent = `${state.comments.length}건`;
+  if (!state.comments.length) {
+    els.commentsList.innerHTML = `<div class="empty-small">등록된 후기가 없습니다.</div>`;
+    return;
+  }
+
+  els.commentsList.innerHTML = state.comments
+    .map(
+      (comment) => `
+        <article class="comment-item">
+          <span class="comment-name">${escapeHtml(comment.display_name)}</span>
+          <span class="comment-body">${escapeHtml(comment.body)}</span>
+          <time>${formatDate(comment.created_at)}</time>
+        </article>
+      `
+    )
+    .join("");
+}
+
+function commentLength() {
+  return [...(els.commentInput.value || "")].length;
+}
+
+function updateCommentSubmit() {
+  const length = commentLength();
+  els.commentCounter.textContent = `${length}/50`;
+  els.commentForm.querySelector('button[type="submit"]').disabled = !state.selected || length === 0 || length > 50;
+}
+
+async function submitComment(event) {
+  event.preventDefault();
+  const length = commentLength();
+  if (!state.selected || length === 0 || length > 50) return;
+
+  const response = await request("/api/comments", {
+    method: "POST",
+    body: { course: coursePayload(state.selected), body: els.commentInput.value }
+  });
+  state.comments = [response.comment, ...state.comments];
+  els.commentForm.reset();
+  updateCommentSubmit();
+  renderComments();
+  showToast("후기를 등록했습니다.");
+}
+
 function formValue(form, name) {
   return form.elements[name]?.value || "";
 }
@@ -722,6 +775,8 @@ function resetReportForms() {
   [els.directForm, els.quickForm].forEach(resetReportForm);
   updateDirectSubmit();
   updateQuickSubmit();
+  els.commentForm.reset();
+  updateCommentSubmit();
 }
 
 function directHasContent() {
@@ -1513,7 +1568,7 @@ function bindEvents() {
     const courseButton = event.target.closest("[data-course-id]");
     try {
       if (favoriteButton) {
-        const course = state.courses.find((item) => item.id === favoriteButton.dataset.favoriteCourseId);
+        const course = state.courses.find((item) => item.course_key === favoriteButton.dataset.favoriteCourseId);
         await toggleFavorite(course);
         return;
       }
@@ -1562,6 +1617,8 @@ function bindEvents() {
   els.quickForm.addEventListener("change", handleQuickFormChange);
   els.quickForm.addEventListener("input", handleQuickFormChange);
   els.quickForm.addEventListener("submit", (event) => submitQuick(event).catch((error) => showToast(error.message)));
+  els.commentForm.addEventListener("input", updateCommentSubmit);
+  els.commentForm.addEventListener("submit", (event) => submitComment(event).catch((error) => showToast(error.message)));
 
   els.pollBox.addEventListener("click", async (event) => {
     const rating = event.target.closest("[data-rating]");
@@ -1619,11 +1676,14 @@ async function init() {
   resetReportForms();
 
   try {
-    state.config = await request("/api/config", { auth: false });
-    await loadCourses();
-    await refreshMe().catch(() => {
-      state.user = null;
-    });
+    const [config] = await Promise.all([
+      request("/api/config", { auth: false }),
+      loadCourses(),
+      refreshMe().catch(() => {
+        state.user = null;
+      })
+    ]);
+    state.config = config;
     await Promise.all([loadActivity(), loadFavorites()]);
     renderAll();
     await restoreLastSelectedCourse();

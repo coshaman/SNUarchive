@@ -149,6 +149,22 @@ create index if not exists difficulty_votes_monthly_idx
 create index if not exists difficulty_votes_assessment_idx
   on public.difficulty_votes (course_key, assessment_label, created_at asc);
 
+create table if not exists public.course_comments (
+  id uuid primary key default gen_random_uuid(),
+  course_key text not null,
+  course_id text not null,
+  course_title text not null,
+  instructor text not null,
+  department text not null,
+  display_name text not null,
+  body varchar(50) not null,
+  author_email_hash text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists course_comments_course_key_idx
+  on public.course_comments (course_key, created_at desc);
+
 create table if not exists public.activity_logs (
   id uuid primary key default gen_random_uuid(),
   user_email text not null,
@@ -179,4 +195,5 @@ alter table public.quick_reports enable row level security;
 alter table public.course_favorites enable row level security;
 alter table public.difficulty_polls enable row level security;
 alter table public.difficulty_votes enable row level security;
+alter table public.course_comments enable row level security;
 alter table public.activity_logs enable row level security;
