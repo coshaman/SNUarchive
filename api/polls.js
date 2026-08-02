@@ -12,10 +12,11 @@ const {
   sendJson
 } = require("./_utils");
 
-async function statusFor(store, courseKey, user, assessmentLabel = "") {
+async function statusFor(store, courseKey, user, { assessmentLabel = "", preferredAssessmentLabel = "" } = {}) {
   const requestedAssessment = assessmentLabel ? normalizeAssessment(assessmentLabel) : "";
+  const fallbackAssessment = preferredAssessmentLabel ? normalizeAssessment(preferredAssessmentLabel) : "";
   const poll = await store.activePoll(courseKey, requestedAssessment);
-  const selectedAssessment = normalizeAssessment(requestedAssessment || poll?.assessment_label || "기타");
+  const selectedAssessment = normalizeAssessment(requestedAssessment || poll?.assessment_label || fallbackAssessment || "기타");
   const votes = courseKey ? await store.votesForCourseAssessment(courseKey, selectedAssessment) : [];
   const voteCountInWindow = await store.voteWindowCount(user);
   const limit = 10;
@@ -38,7 +39,8 @@ module.exports = async function handler(req, res) {
       const url = new URL(req.url, "http://localhost");
       const courseKey = url.searchParams.get("courseKey");
       const assessmentLabel = url.searchParams.get("assessmentLabel") || "";
-      sendJson(res, 200, await statusFor(store, courseKey || "", user, assessmentLabel));
+      const preferredAssessmentLabel = url.searchParams.get("preferredAssessmentLabel") || "";
+      sendJson(res, 200, await statusFor(store, courseKey || "", user, { assessmentLabel, preferredAssessmentLabel }));
       return;
     }
 
@@ -53,7 +55,7 @@ module.exports = async function handler(req, res) {
         instructor: poll.instructor,
         assessmentLabel: poll.assessment_label
       });
-      sendJson(res, 201, await statusFor(store, poll.course_key, user, poll.assessment_label));
+      sendJson(res, 201, await statusFor(store, poll.course_key, user, { assessmentLabel: poll.assessment_label }));
       return;
     }
 
@@ -74,7 +76,7 @@ module.exports = async function handler(req, res) {
         assessmentLabel: poll.assessment_label,
         rating
       });
-      sendJson(res, 201, await statusFor(store, course.course_key, user, poll.assessment_label));
+      sendJson(res, 201, await statusFor(store, course.course_key, user, { assessmentLabel: poll.assessment_label }));
       return;
     }
 

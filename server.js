@@ -1,6 +1,8 @@
+const crypto = require("crypto");
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
+const zlib = require("zlib");
 const { pathToFileURL } = require("url");
 
 const root = __dirname;
@@ -37,7 +39,8 @@ const apiRoutes = {
   "/api/quick-reports": "./api/quick-reports.js",
   "/api/admin-stats": "./api/admin-stats.js",
   "/api/admin-logs": "./api/admin-logs.js",
-  "/api/polls": "./api/polls.js"
+  "/api/polls": "./api/polls.js",
+  "/api/comments": "./api/comments.js"
 };
 
 const mimeTypes = {
@@ -53,7 +56,9 @@ const mimeTypes = {
   ".pdf": "application/pdf"
 };
 
-function sendFile(res, filePath) {
+const compressibleTypes = /^(text\/|application\/javascript|application\/json|image\/svg)/;
+
+function sendFile(req, res, filePath) {
   if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
     res.statusCode = 404;
     res.end("Not found");
@@ -61,8 +66,27 @@ function sendFile(res, filePath) {
   }
 
   const ext = path.extname(filePath).toLowerCase();
-  res.setHeader("content-type", mimeTypes[ext] || "application/octet-stream");
-  res.end(fs.readFileSync(filePath));
+  const contentType = mimeTypes[ext] || "application/octet-stream";
+  const buffer = fs.readFileSync(filePath);
+  const etag = `"${crypto.createHash("sha1").update(buffer).digest("hex")}"`;
+
+  res.setHeader("content-type", contentType);
+  res.setHeader("etag", etag);
+  res.setHeader("cache-control", "public, max-age=0, must-revalidate");
+
+  if (req.headers["if-none-match"] === etag) {
+    res.statusCode = 304;
+    res.end();
+    return;
+  }
+
+  if (compressibleTypes.test(contentType) && /\bgzip\b/.test(req.headers["accept-encoding"] || "")) {
+    res.setHeader("content-encoding", "gzip");
+    res.end(zlib.gzipSync(buffer));
+    return;
+  }
+
+  res.end(buffer);
 }
 
 function localResponse(res) {
@@ -108,7 +132,7 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname.startsWith("/uploads/")) {
       const uploadName = path.basename(pathname);
-      sendFile(res, path.join(localUploadDir, uploadName));
+      sendFile(req, res, path.join(localUploadDir, uploadName));
       return;
     }
 
@@ -123,11 +147,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (fs.existsSync(normalized)) {
-      sendFile(res, normalized);
+      sendFile(req, res, normalized);
       return;
     }
 
-    sendFile(res, path.join(publicDir, "index.html"));
+    sendFile(req, res, path.join(publicDir, "index.html"));
   } catch (error) {
     console.error(error);
     res.statusCode = 500;

@@ -93,6 +93,27 @@ function normalizeAssessment(value) {
   return normalizeText(value, 24) || "기타";
 }
 
+const MAX_COMMENT_LENGTH = 50;
+
+function normalizeCommentBody(value) {
+  const collapsed = String(value ?? "").replace(/\s+/g, " ").trim();
+  const chars = [...collapsed];
+  if (!chars.length) throw createError(400, "후기 내용을 입력해주세요.");
+  if (chars.length > MAX_COMMENT_LENGTH) {
+    throw createError(400, `후기는 ${MAX_COMMENT_LENGTH}자 이하로 입력해주세요.`);
+  }
+  return collapsed;
+}
+
+function maskDisplayName(name, email) {
+  const source = normalizeText(name, 60) || String(email || "").split("@")[0];
+  const chars = [...source];
+  if (!chars.length) return "익명";
+  if (chars.length === 1) return chars[0];
+  if (chars.length === 2) return `${chars[0]}*`;
+  return `${chars[0]}${"*".repeat(chars.length - 2)}${chars[chars.length - 1]}`;
+}
+
 function sameAssessment(row, assessmentLabel) {
   return normalizeAssessment(row.assessment_label || row.assessmentLabel) === normalizeAssessment(assessmentLabel);
 }
@@ -485,7 +506,7 @@ function localDbPath() {
 }
 
 function defaultDb() {
-  return { stats: [], quickReports: [], polls: [], votes: [], favorites: [], logs: [] };
+  return { stats: [], quickReports: [], polls: [], votes: [], favorites: [], logs: [], comments: [] };
 }
 
 function readLocalDb() {
@@ -519,6 +540,12 @@ function publicStat(row) {
 function publicFavorite(row) {
   const copy = { ...row };
   delete copy.user_email_hash;
+  return copy;
+}
+
+function visibleComment(row) {
+  const copy = { ...row };
+  delete copy.author_email_hash;
   return copy;
 }
 
@@ -778,6 +805,26 @@ const supabaseRepo = {
       difficulty_tags: tags.join(",")
     });
     return rows[0];
+  },
+
+  async listComments(courseKeyValue, limit = 50, offset = 0) {
+    return supabaseRequest(
+      restPath("course_comments", {
+        course_key: `eq.${courseKeyValue}`,
+        order: "created_at.desc",
+        limit: String(limit),
+        offset: String(offset)
+      })
+    );
+  },
+
+  async insertComment(payload) {
+    const rows = await restInsert("course_comments", payload);
+    return rows[0];
+  },
+
+  async deleteComment(id) {
+    return restDelete("course_comments", { id: `eq.${id}` });
   }
 };
 
@@ -1004,6 +1051,28 @@ const localRepo = {
     db.votes.push(row);
     writeLocalDb(db);
     return row;
+  },
+
+  async listComments(courseKeyValue, limit = 50, offset = 0) {
+    return readLocalDb()
+      .comments.filter((row) => rowCourseKey(row) === courseKeyValue)
+      .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+      .slice(offset, offset + limit);
+  },
+
+  async insertComment(payload) {
+    const db = readLocalDb();
+    const row = { id: crypto.randomUUID(), created_at: new Date().toISOString(), ...payload };
+    db.comments.push(row);
+    writeLocalDb(db);
+    return row;
+  },
+
+  async deleteComment(id) {
+    const db = readLocalDb();
+    db.comments = db.comments.filter((row) => row.id !== id);
+    writeLocalDb(db);
+    return { deleted: true };
   }
 };
 
@@ -1090,6 +1159,7 @@ async function handleError(res, error) {
 }
 
 module.exports = {
+  MAX_COMMENT_LENGTH,
   MAX_UPLOAD_BYTES,
   OAUTH_STATE_COOKIE,
   SESSION_COOKIE,
@@ -1106,10 +1176,12 @@ module.exports = {
   isDemoAuthAllowed,
   isGoogleAuthConfigured,
   isSupabaseConfigured,
+  maskDisplayName,
   method,
   clampLimit,
   clampOffset,
   normalizeAssessment,
+  normalizeCommentBody,
   normalizeCourse,
   normalizeNickname,
   normalizeTags,
@@ -1125,5 +1197,6 @@ module.exports = {
   requireUser,
   sendJson,
   setSessionCookie,
-  verifyOAuthState
+  verifyOAuthState,
+  visibleComment
 };

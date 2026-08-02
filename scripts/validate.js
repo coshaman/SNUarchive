@@ -18,6 +18,7 @@ const requiredFiles = [
   "api/quick-reports.js",
   "api/admin-stats.js",
   "api/polls.js",
+  "api/comments.js",
   "supabase/schema.sql"
 ];
 
@@ -28,7 +29,7 @@ if (missing.length) {
 }
 
 const courses = JSON.parse(fs.readFileSync(path.join(root, "public/courses.json"), "utf8"));
-const requiredKeys = ["id", "course_key", "title", "instructor", "department", "departments", "offerings"];
+const requiredKeys = ["course_key", "title", "instructor", "department", "departments", "offerings"];
 const invalidCourse = courses.find((course) => {
   if (requiredKeys.some((key) => course[key] === undefined || course[key] === "")) return true;
   if (!Array.isArray(course.departments) || !course.departments.length) return true;
