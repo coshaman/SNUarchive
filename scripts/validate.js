@@ -17,6 +17,9 @@ const requiredFiles = [
   "api/stats.js",
   "api/quick-reports.js",
   "api/admin-stats.js",
+  "api/admin-logs.js",
+  "api/admin-user-stats.js",
+  "api/profile.js",
   "api/polls.js",
   "api/comments.js",
   "supabase/schema.sql"
