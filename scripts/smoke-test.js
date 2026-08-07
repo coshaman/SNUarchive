@@ -114,6 +114,23 @@ async function main() {
     }
   });
 
+  await request("/api/profile", token, {
+    method: "POST",
+    body: { college: "공과대학", admissionYear: "21" }
+  });
+  const profile = await request("/api/profile", token);
+  const collegeStats = await request("/api/admin-user-stats", adminToken);
+
+  let nonAdminBlocked = false;
+  try {
+    await request("/api/admin-user-stats", token);
+  } catch (error) {
+    nonAdminBlocked = /권한/.test(error.message);
+  }
+  if (!nonAdminBlocked) {
+    throw new Error("non-admin was not blocked from /api/admin-user-stats");
+  }
+
   console.log(
     JSON.stringify(
       {
@@ -123,7 +140,10 @@ async function main() {
         stats: stats.stats.length,
         pollActive: opened.active,
         voteCount: voted.voteCount,
-        queuedBeforeReview: queue.reports.length
+        queuedBeforeReview: queue.reports.length,
+        profileCollege: profile.college,
+        profiledUsers: collegeStats.profiledUsers,
+        nonAdminBlockedFromAdminStats: nonAdminBlocked
       },
       null,
       2
