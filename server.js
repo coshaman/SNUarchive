@@ -39,6 +39,8 @@ const apiRoutes = {
   "/api/quick-reports": "./api/quick-reports.js",
   "/api/admin-stats": "./api/admin-stats.js",
   "/api/admin-logs": "./api/admin-logs.js",
+  "/api/admin-user-stats": "./api/admin-user-stats.js",
+  "/api/profile": "./api/profile.js",
   "/api/polls": "./api/polls.js",
   "/api/comments": "./api/comments.js"
 };

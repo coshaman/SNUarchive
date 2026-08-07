@@ -1,4 +1,4 @@
-const { isDemoAuthAllowed, isGoogleAuthConfigured, sendJson } = require("./_utils");
+const { SNU_COLLEGES, isDemoAuthAllowed, isGoogleAuthConfigured, sendJson } = require("./_utils");
 
 module.exports = async function handler(req, res) {
   sendJson(res, 200, {
@@ -6,6 +6,7 @@ module.exports = async function handler(req, res) {
     googleAuth: isGoogleAuthConfigured(),
     loginUrl: "/api/auth/google/start",
     demoAuth: isDemoAuthAllowed(),
-    uploadLimitMb: 3
+    uploadLimitMb: 3,
+    colleges: SNU_COLLEGES
   });
 };

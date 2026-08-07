@@ -37,12 +37,14 @@ const state = {
   courseAdminReports: [],
   adminStats: [],
   adminLogs: [],
+  adminCollegeStats: null,
   adminTab: "work",
   adminHasMore: {
     reports: false,
     stats: false,
     logs: false
   },
+  profile: null,
   toastTimer: null
 };
 
@@ -96,6 +98,15 @@ function cacheElements() {
     adminLogsMore: $("#adminLogsMore"),
     adminLogsExport: $("#adminLogsExport"),
     adminLogsClear: $("#adminLogsClear"),
+    adminCollegePanel: $("#adminCollegePanel"),
+    adminCollegeCount: $("#adminCollegeCount"),
+    adminCollegeStats: $("#adminCollegeStats"),
+    adminYearStats: $("#adminYearStats"),
+    profileBanner: $("#profileBanner"),
+    profileForm: $("#profileForm"),
+    profileCollege: $("#profileCollege"),
+    profileAdmissionYear: $("#profileAdmissionYear"),
+    profileBannerDismiss: $("#profileBannerDismiss"),
     toast: $("#toast")
   });
 }
@@ -211,6 +222,64 @@ async function loadFavorites() {
   state.favorites = new Set((response.favorites || []).map((favorite) => favorite.course_key));
 }
 
+function populateCollegeOptions() {
+  if (!els.profileCollege) return;
+  const colleges = state.config?.colleges || [];
+  els.profileCollege.innerHTML =
+    `<option value="">단과대학 선택</option>` +
+    colleges.map((college) => `<option value="${escapeHtml(college)}">${escapeHtml(college)}</option>`).join("");
+}
+
+async function loadProfile() {
+  els.profileForm?.reset();
+  if (!state.user) {
+    state.profile = null;
+    return;
+  }
+
+  state.profile = await request("/api/profile").catch(() => null);
+}
+
+function profileBannerDismissKey() {
+  return `snu-archive:profile-banner-dismissed:${state.user?.email || ""}`;
+}
+
+function renderProfileBanner() {
+  if (!els.profileBanner) return;
+  const hasProfile = Boolean(state.profile?.college || state.profile?.admissionYear);
+  const dismissed = sessionStorage.getItem(profileBannerDismissKey()) === "1";
+  const show = Boolean(state.user) && !hasProfile && !dismissed;
+  els.profileBanner.hidden = !show;
+  if (show && state.profile?.suggestedAdmissionYear && !els.profileAdmissionYear.value) {
+    els.profileAdmissionYear.value = String(state.profile.suggestedAdmissionYear).slice(2);
+  }
+}
+
+async function submitProfile(event) {
+  event.preventDefault();
+  const form = new FormData(els.profileForm);
+  const college = String(form.get("college") || "").trim();
+  const admissionYear = String(form.get("admissionYear") || "").trim();
+  if (!college && !admissionYear) {
+    showToast("단과대학 또는 입학년도를 입력해주세요.");
+    return;
+  }
+
+  const payload = {};
+  if (college) payload.college = college;
+  if (admissionYear) payload.admissionYear = admissionYear;
+
+  await request("/api/profile", { method: "POST", body: payload });
+  await loadProfile();
+  renderProfileBanner();
+  showToast("저장되었습니다. 감사합니다!");
+}
+
+function dismissProfileBanner() {
+  sessionStorage.setItem(profileBannerDismissKey(), "1");
+  renderProfileBanner();
+}
+
 function defaultAssessmentByDate(date = new Date()) {
   const md = (date.getMonth() + 1) * 100 + date.getDate();
   if ((md >= 415 && md <= 505) || (md >= 1015 && md <= 1105)) return "중간";
@@ -225,7 +294,7 @@ function signInWithGoogle() {
 async function demoLogin(email) {
   state.token = `demo:${email}`;
   await refreshMe();
-  await Promise.all([loadActivity(), loadFavorites()]);
+  await Promise.all([loadActivity(), loadFavorites(), loadProfile()]);
   renderAll();
   showToast(`${email} 로그인`);
 }
@@ -241,6 +310,7 @@ async function signOut() {
   state.pollAssessment = "";
   state.favorites = new Set();
   state.activity = { recentStats: {}, activePolls: new Set() };
+  state.profile = null;
   renderAll();
 }
 
@@ -305,6 +375,7 @@ function setView(view) {
 
 function renderAll() {
   renderAuth();
+  renderProfileBanner();
   renderSearch();
   setView(state.view);
   els.archiveView.classList.toggle("has-selection", Boolean(state.selected));
@@ -1167,6 +1238,10 @@ async function loadAdminData() {
     await loadAdminLogs();
     return;
   }
+  if (state.adminTab === "college") {
+    await loadAdminCollegeStats();
+    return;
+  }
   await loadAdminReports();
 }
 
@@ -1201,13 +1276,14 @@ async function loadAdminLogs({ append = false } = {}) {
 }
 
 function setAdminTab(tab) {
-  state.adminTab = ["work", "stats", "logs"].includes(tab) ? tab : "work";
+  state.adminTab = ["work", "stats", "logs", "college"].includes(tab) ? tab : "work";
   els.adminSubTabs?.querySelectorAll("[data-admin-tab]").forEach((button) => {
     button.classList.toggle("active", button.dataset.adminTab === state.adminTab);
   });
   if (els.adminWorkPanel) els.adminWorkPanel.hidden = state.adminTab !== "work";
   if (els.adminStatsPanel) els.adminStatsPanel.hidden = state.adminTab !== "stats";
   if (els.adminLogPanel) els.adminLogPanel.hidden = state.adminTab !== "logs";
+  if (els.adminCollegePanel) els.adminCollegePanel.hidden = state.adminTab !== "college";
 }
 
 function actionLabel(action) {
@@ -1258,6 +1334,39 @@ function renderAdminLogs() {
       `;
     })
     .join("");
+}
+
+async function loadAdminCollegeStats() {
+  state.adminCollegeStats = await request("/api/admin-user-stats");
+  renderAdminCollegeStats();
+}
+
+function statBarRow(label, count, max) {
+  const pct = max ? Math.round((count / max) * 100) : 0;
+  return `
+    <div class="stat-bar-row">
+      <span class="stat-bar-label">${escapeHtml(label)}</span>
+      <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${pct}%"></div></div>
+      <span class="stat-bar-count">${count}</span>
+    </div>
+  `;
+}
+
+function renderAdminCollegeStats() {
+  const stats = state.adminCollegeStats;
+  if (!stats || !els.adminCollegeStats) return;
+
+  els.adminCollegeCount.textContent = `입력 ${stats.profiledUsers}명 · 로그인 ${stats.totalLoginUsers}명`;
+
+  const maxCollege = Math.max(1, ...stats.byCollege.map((row) => row.count));
+  els.adminCollegeStats.innerHTML = stats.byCollege.length
+    ? stats.byCollege.map((row) => statBarRow(row.college, row.count, maxCollege)).join("")
+    : `<div class="empty-small">아직 입력된 학과 정보가 없습니다.</div>`;
+
+  const maxYear = Math.max(1, ...stats.byAdmissionYear.map((row) => row.count));
+  els.adminYearStats.innerHTML = stats.byAdmissionYear.length
+    ? stats.byAdmissionYear.map((row) => statBarRow(`${row.year}학번`, row.count, maxYear)).join("")
+    : `<div class="empty-small">아직 입력된 입학년도 정보가 없습니다.</div>`;
 }
 
 async function exportAdminLogs() {
@@ -1666,6 +1775,11 @@ function bindEvents() {
     const button = event.target.closest("[data-stat-action='save']");
     if (button) handleStatSave(button).catch((error) => showToast(error.message));
   });
+
+  els.profileForm.addEventListener("submit", (event) => {
+    submitProfile(event).catch((error) => showToast(error.message));
+  });
+  els.profileBannerDismiss.addEventListener("click", dismissProfileBanner);
 }
 
 async function init() {
@@ -1684,7 +1798,8 @@ async function init() {
       })
     ]);
     state.config = config;
-    await Promise.all([loadActivity(), loadFavorites()]);
+    populateCollegeOptions();
+    await Promise.all([loadActivity(), loadFavorites(), loadProfile()]);
     renderAll();
     await restoreLastSelectedCourse();
 

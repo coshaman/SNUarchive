@@ -20,6 +20,28 @@
       </div>
     </header>
 
+    <section class="profile-banner" id="profileBanner" hidden>
+      <div class="profile-banner-copy">
+        <strong>학과 통계에 참여해보세요</strong>
+        <span>단과대학 · 입학년도(선택)만 입력하면 학과별 이용 현황에 반영돼요. 이름은 수집하지 않습니다.</span>
+      </div>
+      <form class="profile-banner-form" id="profileForm">
+        <select name="college" id="profileCollege">
+          <option value="">단과대학 선택</option>
+        </select>
+        <input
+          name="admissionYear"
+          id="profileAdmissionYear"
+          type="text"
+          inputmode="numeric"
+          maxlength="4"
+          placeholder="입학년도(예: 21)"
+        />
+        <button class="primary" type="submit">저장</button>
+        <button class="subtle" type="button" id="profileBannerDismiss">나중에</button>
+      </form>
+    </section>
+
     <main>
       <section class="signin-tile" id="signinTile">
         <div class="signin-copy">
@@ -258,6 +280,7 @@
               <button type="button" class="active" data-admin-tab="work">제보 관리</button>
               <button type="button" data-admin-tab="stats">최근 통계량</button>
               <button type="button" data-admin-tab="logs">로그 보기</button>
+              <button type="button" data-admin-tab="college">학과 통계</button>
             </div>
             <button class="primary" id="adminRefreshButton" type="button">새로고침</button>
           </div>
@@ -291,6 +314,17 @@
           </div>
           <div id="adminLogs" class="admin-list"></div>
           <button class="subtle admin-more" id="adminLogsMore" type="button">더 보기</button>
+        </section>
+        <section class="section-block admin-college-panel" id="adminCollegePanel" hidden>
+          <div class="section-title">
+            <h2>학과별 사용자 수</h2>
+            <span id="adminCollegeCount">0명</span>
+          </div>
+          <div id="adminCollegeStats" class="stat-bars"></div>
+          <div class="section-title">
+            <h2>입학년도별 사용자 수</h2>
+          </div>
+          <div id="adminYearStats" class="stat-bars"></div>
         </section>
       </section>
     </main>
