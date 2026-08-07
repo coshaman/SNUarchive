@@ -177,6 +177,19 @@ create table if not exists public.activity_logs (
 create index if not exists activity_logs_created_at_idx
   on public.activity_logs (created_at desc);
 
+create table if not exists public.user_profiles (
+  id uuid primary key default gen_random_uuid(),
+  user_email_hash text not null unique,
+  college text,
+  admission_year integer,
+  last_ip text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz
+);
+
+create index if not exists user_profiles_college_idx
+  on public.user_profiles (college);
+
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
   'quick-reports',
@@ -197,3 +210,4 @@ alter table public.difficulty_polls enable row level security;
 alter table public.difficulty_votes enable row level security;
 alter table public.course_comments enable row level security;
 alter table public.activity_logs enable row level security;
+alter table public.user_profiles enable row level security;

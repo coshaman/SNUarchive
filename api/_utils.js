@@ -8,6 +8,26 @@ const STAT_FIELDS = ["q1", "q2", "q3", "q4", "average", "max_score"];
 const VOTE_LIMIT = 10;
 const SESSION_COOKIE = "snu_archive_session";
 const OAUTH_STATE_COOKIE = "snu_oauth_state";
+const SNU_COLLEGES = [
+  "인문대학",
+  "사회과학대학",
+  "자연과학대학",
+  "간호대학",
+  "경영대학",
+  "공과대학",
+  "농업생명과학대학",
+  "미술대학",
+  "사범대학",
+  "생활과학대학",
+  "수의과대학",
+  "약학대학",
+  "음악대학",
+  "의과대학",
+  "자유전공학부",
+  "법학전문대학원",
+  "치의학대학원",
+  "대학원/기타"
+];
 
 function isSupabaseConfigured() {
   return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -181,6 +201,44 @@ function adminEmails() {
 
 function isSnuEmail(email) {
   return String(email || "").toLowerCase().endsWith("@snu.ac.kr");
+}
+
+function getClientIp(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (forwarded) return String(forwarded).split(",")[0].trim();
+  return req.socket?.remoteAddress || req.connection?.remoteAddress || "";
+}
+
+function normalizeCollege(value) {
+  const college = normalizeText(value, 40);
+  if (!college) return null;
+  if (!SNU_COLLEGES.includes(college)) throw createError(400, "올바른 단과대학을 선택해주세요.");
+  return college;
+}
+
+function normalizeAdmissionYear(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  if (!/^\d{2}$|^\d{4}$/.test(text)) {
+    throw createError(400, "입학년도는 2자리 또는 4자리 숫자로 입력해주세요.");
+  }
+  const year = text.length === 2 ? 2000 + Number(text) : Number(text);
+  const currentYear = new Date().getFullYear();
+  if (year < 1980 || year > currentYear + 1) {
+    throw createError(400, "입학년도 값이 올바르지 않습니다.");
+  }
+  return year;
+}
+
+function guessAdmissionYearFromEmail(email) {
+  const local = String(email || "").split("@")[0];
+  const match = local.match(/^(\d{4})[-_]?\d{4,}/) || local.match(/^(\d{2})[-_]\d{4,}/);
+  if (!match) return null;
+  const raw = match[1];
+  const year = raw.length === 2 ? 2000 + Number(raw) : Number(raw);
+  const currentYear = new Date().getFullYear();
+  if (year < 1980 || year > currentYear + 1) return null;
+  return year;
 }
 
 function parseCookies(req) {
@@ -506,7 +564,7 @@ function localDbPath() {
 }
 
 function defaultDb() {
-  return { stats: [], quickReports: [], polls: [], votes: [], favorites: [], logs: [], comments: [] };
+  return { stats: [], quickReports: [], polls: [], votes: [], favorites: [], logs: [], comments: [], profiles: [] };
 }
 
 function readLocalDb() {
@@ -825,6 +883,41 @@ const supabaseRepo = {
 
   async deleteComment(id) {
     return restDelete("course_comments", { id: `eq.${id}` });
+  },
+
+  async getUserProfile(user) {
+    const rows = await supabaseRequest(
+      restPath("user_profiles", { user_email_hash: `eq.${user.emailHash}`, limit: "1" })
+    );
+    return rows[0] || null;
+  },
+
+  async upsertUserProfile(user, payload, ip) {
+    const existing = await this.getUserProfile(user);
+    const data = {
+      college: payload.college,
+      admission_year: payload.admissionYear,
+      last_ip: ip || null
+    };
+
+    if (existing) {
+      const rows = await restPatch("user_profiles", existing.id, data);
+      return rows[0];
+    }
+
+    const rows = await restInsert("user_profiles", {
+      user_email_hash: user.emailHash,
+      ...data
+    });
+    return rows[0];
+  },
+
+  async collegeStats() {
+    const [profiles, loginRows] = await Promise.all([
+      supabaseRequest(restPath("user_profiles", { select: "college,admission_year", limit: "5000" })),
+      supabaseRequest(restPath("activity_logs", { select: "user_email", action: "eq.login", limit: "5000" }))
+    ]);
+    return summarizeCollegeStats(profiles, loginRows);
   }
 };
 
@@ -1073,6 +1166,41 @@ const localRepo = {
     db.comments = db.comments.filter((row) => row.id !== id);
     writeLocalDb(db);
     return { deleted: true };
+  },
+
+  async getUserProfile(user) {
+    return readLocalDb().profiles.find((row) => row.user_email_hash === user.emailHash) || null;
+  },
+
+  async upsertUserProfile(user, payload, ip) {
+    const db = readLocalDb();
+    const index = db.profiles.findIndex((row) => row.user_email_hash === user.emailHash);
+    const data = {
+      college: payload.college,
+      admission_year: payload.admissionYear,
+      last_ip: ip || null
+    };
+
+    if (index === -1) {
+      const row = {
+        id: crypto.randomUUID(),
+        user_email_hash: user.emailHash,
+        created_at: new Date().toISOString(),
+        ...data
+      };
+      db.profiles.push(row);
+      writeLocalDb(db);
+      return row;
+    }
+
+    db.profiles[index] = { ...db.profiles[index], ...data, updated_at: new Date().toISOString() };
+    writeLocalDb(db);
+    return db.profiles[index];
+  },
+
+  async collegeStats() {
+    const db = readLocalDb();
+    return summarizeCollegeStats(db.profiles, db.logs.filter((row) => row.action === "login"));
   }
 };
 
@@ -1122,6 +1250,28 @@ function summarizeActivity(stats, polls) {
   return { recentStats, activePolls };
 }
 
+function summarizeCollegeStats(profiles, loginRows) {
+  const byCollege = new Map();
+  const byYear = new Map();
+  for (const row of profiles) {
+    if (row.college) byCollege.set(row.college, (byCollege.get(row.college) || 0) + 1);
+    if (row.admission_year) byYear.set(row.admission_year, (byYear.get(row.admission_year) || 0) + 1);
+  }
+
+  const totalLoginUsers = new Set(loginRows.map((row) => row.user_email).filter(Boolean)).size;
+
+  return {
+    totalLoginUsers,
+    profiledUsers: profiles.length,
+    byCollege: [...byCollege.entries()]
+      .map(([college, count]) => ({ college, count }))
+      .sort((a, b) => b.count - a.count || a.college.localeCompare(b.college, "ko")),
+    byAdmissionYear: [...byYear.entries()]
+      .map(([year, count]) => ({ year, count }))
+      .sort((a, b) => a.year - b.year)
+  };
+}
+
 function pollSummary(poll, votes, user, assessmentLabel = "기타") {
   const distribution = [1, 2, 3, 4, 5].map(
     (rating) => votes.filter((vote) => Number(vote.rating) === rating).length
@@ -1163,6 +1313,7 @@ module.exports = {
   MAX_UPLOAD_BYTES,
   OAUTH_STATE_COOKIE,
   SESSION_COOKIE,
+  SNU_COLLEGES,
   STAT_FIELDS,
   buildStatPayload,
   buildStatUpdatePayload,
@@ -1172,6 +1323,8 @@ module.exports = {
   createError,
   createOAuthState,
   decodeUpload,
+  getClientIp,
+  guessAdmissionYearFromEmail,
   handleError,
   isDemoAuthAllowed,
   isGoogleAuthConfigured,
@@ -1180,7 +1333,9 @@ module.exports = {
   method,
   clampLimit,
   clampOffset,
+  normalizeAdmissionYear,
   normalizeAssessment,
+  normalizeCollege,
   normalizeCommentBody,
   normalizeCourse,
   normalizeNickname,
