@@ -6,7 +6,6 @@ let firebaseAppModule = null;
 let firebaseFirestoreModule = null;
 let firebaseStorageModule = null;
 let firebaseAppInstance = null;
-let firebaseSettingsApplied = false;
 
 const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
 const QUICK_BUCKET = "quick-reports";
@@ -521,12 +520,7 @@ function firebaseDb() {
     throw createError(500, "Firebase 서버 환경변수가 설정되지 않았습니다.");
   }
   if (!firebaseFirestoreModule) firebaseFirestoreModule = require("firebase-admin/firestore");
-  const db = firebaseFirestoreModule.getFirestore(firebaseApp());
-  if (!firebaseSettingsApplied) {
-    db.settings({ ignoreUndefinedProperties: true });
-    firebaseSettingsApplied = true;
-  }
-  return db;
+  return firebaseFirestoreModule.getFirestore(firebaseApp());
 }
 
 function firebaseBucket() {
@@ -541,6 +535,16 @@ function firebaseRow(doc) {
   return { id: doc.id, ...doc.data() };
 }
 
+function cleanFirestoreData(value) {
+  if (Array.isArray(value)) return value.filter((item) => item !== undefined).map(cleanFirestoreData);
+  if (!value || typeof value !== "object" || value.constructor !== Object) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .map(([key, item]) => [key, cleanFirestoreData(item)])
+  );
+}
+
 async function firebaseDocs(query) {
   const snapshot = await query.get();
   return snapshot.docs.map(firebaseRow);
@@ -548,7 +552,7 @@ async function firebaseDocs(query) {
 
 async function firebaseInsert(collectionName, payload) {
   const ref = firebaseDb().collection(collectionName).doc();
-  const row = { created_at: new Date().toISOString(), ...payload };
+  const row = cleanFirestoreData({ created_at: new Date().toISOString(), ...payload });
   await ref.set(row);
   return { id: ref.id, ...row };
 }
@@ -557,7 +561,7 @@ async function firebasePatch(collectionName, id, payload) {
   const ref = firebaseDb().collection(collectionName).doc(id);
   const snapshot = await ref.get();
   if (!snapshot.exists) throw createError(404, "대상을 찾을 수 없습니다.");
-  await ref.update({ ...payload, updated_at: new Date().toISOString() });
+  await ref.update(cleanFirestoreData({ ...payload, updated_at: new Date().toISOString() }));
   return firebaseRow(await ref.get());
 }
 
@@ -748,7 +752,7 @@ const firebaseRepo = {
     }
 
     await ref.set(
-      {
+      cleanFirestoreData({
         user_email_hash: user.emailHash,
         course_key: course.course_key,
         course_id: course.course_id,
@@ -756,7 +760,7 @@ const firebaseRepo = {
         instructor: course.instructor,
         department: course.department,
         created_at: new Date().toISOString()
-      },
+      }),
       { merge: true }
     );
 
@@ -885,11 +889,11 @@ const firebaseRepo = {
     const ref = firebaseDb().collection("difficulty_votes").doc(voteDocId(poll, user));
     const existing = await ref.get();
     if (existing.exists) {
-      await ref.update({
+      await ref.update(cleanFirestoreData({
         rating,
         difficulty_tags: tags.join(","),
         updated_at: new Date().toISOString()
-      });
+      }));
       return firebaseRow(await ref.get());
     }
 
@@ -908,7 +912,7 @@ const firebaseRepo = {
       difficulty_tags: tags.join(","),
       created_at: new Date().toISOString()
     };
-    await ref.set(row);
+    await ref.set(cleanFirestoreData(row));
     return { id: ref.id, ...row };
   },
 
@@ -942,7 +946,9 @@ const firebaseRepo = {
     };
     const ref = firebaseDb().collection("user_profiles").doc(user.emailHash);
     const existing = await ref.get();
-    await ref.set(existing.exists ? data : { ...data, created_at: new Date().toISOString() }, { merge: true });
+    await ref.set(cleanFirestoreData(existing.exists ? data : { ...data, created_at: new Date().toISOString() }), {
+      merge: true
+    });
     return firebaseRow(await ref.get());
   },
 
