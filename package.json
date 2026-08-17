@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "description": "SNU lecture statistics and difficulty archive",
+  "dependencies": {
+    "firebase-admin": "^14.2.0"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  },
   "scripts": {
     "build:courses": "node scripts/build-courses.js",
     "dev": "node server.js",

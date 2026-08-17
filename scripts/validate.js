@@ -22,7 +22,8 @@ const requiredFiles = [
   "api/profile.js",
   "api/polls.js",
   "api/comments.js",
-  "supabase/schema.sql"
+  "firebase/firestore.rules",
+  "firebase/storage.rules"
 ];
 
 const missing = requiredFiles.filter((file) => !fs.existsSync(path.join(root, file)));

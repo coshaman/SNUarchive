@@ -18,8 +18,8 @@ SNU Archive는 서울대학교 강의 통계량과 난이도 투표를 모아 �
 
 - Frontend: 정적 HTML/CSS/JavaScript (`public/`)
 - API: Vercel Serverless Functions 호환 Node.js 핸들러 (`api/`)
-- Local DB: Supabase 미설정 시 `.local-data/db.json`에 저장됩니다.
-- Production DB/Storage: Supabase Postgres + private Storage bucket
+- Local DB: Firebase 미설정 시 `.local-data/db.json`에 저장됩니다.
+- Production DB/Storage: Firebase Cloud Firestore + Firebase Cloud Storage
 - Course build script: 원본 학기 JSON을 `public/courses.json`으로 변환합니다.
 
 ## 로컬 실행
@@ -27,6 +27,7 @@ SNU Archive는 서울대학교 강의 통계량과 난이도 투표를 모아 �
 Node.js 20 이상이 필요합니다.
 
 ```powershell
+npm install
 copy .env.example .env
 npm run build:courses
 npm run dev
@@ -44,8 +45,8 @@ npm run dev
 GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+FIREBASE_SERVICE_ACCOUNT_BASE64=base64-encoded-service-account-json
+FIREBASE_STORAGE_BUCKET=your-project.firebasestorage.app
 
 ADMIN_EMAILS=admin@snu.ac.kr,coshaman@snu.ac.kr
 AUTH_SESSION_SECRET=change-this-random-session-secret
@@ -54,7 +55,7 @@ ALLOW_DEMO_AUTH=false
 APP_ORIGIN=http://localhost:3000
 ```
 
-`GOOGLE_CLIENT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `AUTH_SESSION_SECRET`, `EMAIL_HASH_SECRET`는 서버에서만 사용해야 합니다. 브라우저 코드나 README에 실제 값을 적지 마세요.
+`GOOGLE_CLIENT_SECRET`, `FIREBASE_SERVICE_ACCOUNT_BASE64`, `AUTH_SESSION_SECRET`, `EMAIL_HASH_SECRET`는 서버에서만 사용해야 합니다. 브라우저 코드나 README에 실제 값을 적지 마세요.
 
 ## Google OAuth 설정
 
@@ -70,21 +71,37 @@ https://your-domain.example/api/auth/google/callback
 
 Vercel 배포 환경에서는 `APP_ORIGIN`을 실제 서비스 주소로 설정해야 callback URL이 올바르게 만들어집니다.
 
-## Supabase 설정
+## Firebase 설정
 
-운영 배포에서는 Supabase 프로젝트를 만들고 SQL Editor에서 `supabase/schema.sql`을 실행합니다.
+운영 배포에서는 Firebase 프로젝트를 만들고 Firestore와 Storage를 켭니다. 이 앱은 브라우저에서 Firebase에 직접 접근하지 않고, Vercel API가 Firebase Admin SDK로만 접근합니다.
 
-이 스키마는 다음을 만듭니다.
+1. Firebase Console에서 프로젝트를 만듭니다.
+2. Build > Firestore Database에서 데이터베이스를 만듭니다.
+3. Build > Storage에서 기본 bucket을 만듭니다.
+4. Project settings > Service accounts에서 새 private key JSON을 발급합니다.
+5. JSON 파일 내용을 base64로 인코딩해 `FIREBASE_SERVICE_ACCOUNT_BASE64`에 넣습니다.
+6. Storage bucket 이름을 `FIREBASE_STORAGE_BUCKET`에 넣습니다.
+
+PowerShell에서 service account JSON을 base64로 만드는 예시는 다음과 같습니다.
+
+```powershell
+[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content -Raw .\firebase-service-account.json)))
+```
+
+컬렉션은 앱이 처음 쓰는 시점에 자동으로 만들어집니다.
 
 - `stat_reports`: 직접 제보와 승인된 통계량
 - `quick_reports`: 간편 제보 큐
 - `course_favorites`: 사용자별 즐겨찾기
 - `difficulty_polls`: 난이도 투표 개설 정보
 - `difficulty_votes`: 난이도 투표 응답
+- `course_comments`: 강의 후기
 - `activity_logs`: 로그인, 제보, 투표, 관리자 작업 로그
-- `quick-reports`: 간편 제보 파일용 private Storage bucket
+- `user_profiles`: 단과대학, 입학년도 관리자 통계
 
-Supabase를 설정하지 않은 로컬 실행에서는 `.local-data/`에 테스트 데이터가 저장됩니다. 이 폴더는 커밋하지 않습니다.
+`firebase/firestore.rules`와 `firebase/storage.rules`는 클라이언트 직접 접근을 모두 막는 규칙입니다. 서버의 Firebase Admin SDK는 이 규칙을 우회하므로 앱 기능에는 영향이 없습니다.
+
+Firebase를 설정하지 않은 로컬 실행에서는 `.local-data/`에 테스트 데이터가 저장됩니다. 이 폴더는 커밋하지 않습니다.
 
 ## Vercel 배포
 

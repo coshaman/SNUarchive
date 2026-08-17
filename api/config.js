@@ -1,9 +1,10 @@
-const { SNU_COLLEGES, isDemoAuthAllowed, isGoogleAuthConfigured, sendJson } = require("./_utils");
+const { SNU_COLLEGES, isDemoAuthAllowed, isFirebaseConfigured, isGoogleAuthConfigured, sendJson } = require("./_utils");
 
 module.exports = async function handler(req, res) {
   sendJson(res, 200, {
     authMode: isGoogleAuthConfigured() ? "google" : "none",
     googleAuth: isGoogleAuthConfigured(),
+    dataStore: isFirebaseConfigured() ? "firebase" : "local",
     loginUrl: "/api/auth/google/start",
     demoAuth: isDemoAuthAllowed(),
     uploadLimitMb: 3,
