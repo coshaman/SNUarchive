@@ -1,0 +1,11 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // All access goes through the server API using the Firebase Admin SDK,
+    // which bypasses these rules entirely. Direct client access is denied.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

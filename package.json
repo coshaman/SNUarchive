@@ -11,5 +11,8 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.3.0"
   }
 }

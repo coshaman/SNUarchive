@@ -1,0 +1,98 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "stat_reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "course_key", "order": "ASCENDING" },
+        { "fieldPath": "year", "order": "DESCENDING" },
+        { "fieldPath": "semester", "order": "DESCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "course_favorites",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user_email_hash", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "quick_reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "quick_reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "course_key", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "quick_reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "course_key", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "difficulty_polls",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "course_key", "order": "ASCENDING" },
+        { "fieldPath": "closes_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "difficulty_polls",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "course_key", "order": "ASCENDING" },
+        { "fieldPath": "assessment_label", "order": "ASCENDING" },
+        { "fieldPath": "closes_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "difficulty_votes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "poll_id", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "difficulty_votes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "course_key", "order": "ASCENDING" },
+        { "fieldPath": "assessment_label", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "difficulty_votes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "voter_email_hash", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "course_comments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "course_key", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

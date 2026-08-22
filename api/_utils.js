@@ -1,9 +1,12 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { initializeApp, cert, getApps } = require("firebase-admin/app");
+const { getFirestore } = require("firebase-admin/firestore");
+const { getStorage } = require("firebase-admin/storage");
 
 const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
-const QUICK_BUCKET = "quick-reports";
+const QUICK_REPORTS_PREFIX = "quick-reports";
 const STAT_FIELDS = ["q1", "q2", "q3", "q4", "average", "max_score"];
 const VOTE_LIMIT = 10;
 const SESSION_COOKIE = "snu_archive_session";
@@ -29,8 +32,10 @@ const SNU_COLLEGES = [
   "대학원/기타"
 ];
 
-function isSupabaseConfigured() {
-  return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+function isFirebaseConfigured() {
+  return Boolean(
+    process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY
+  );
 }
 
 function isGoogleAuthConfigured() {
@@ -190,7 +195,7 @@ function hashEmail(email) {
 }
 
 function adminEmails() {
-  const fallback = isSupabaseConfigured() || isGoogleAuthConfigured() ? "" : "admin@snu.ac.kr,coshaman@snu.ac.kr";
+  const fallback = isFirebaseConfigured() || isGoogleAuthConfigured() ? "" : "admin@snu.ac.kr,coshaman@snu.ac.kr";
   return new Set(
     String(process.env.ADMIN_EMAILS || fallback)
       .split(",")
@@ -454,68 +459,50 @@ function normalizeTags(value) {
   return tags.map((tag) => normalizeText(tag, 20)).filter(Boolean).slice(0, 5);
 }
 
-function supabaseHeaders(extra = {}) {
-  return {
-    apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-    authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-    ...extra
-  };
+function getFirebaseApp() {
+  const existing = getApps();
+  if (existing.length) return existing[0];
+  if (!isFirebaseConfigured()) throw createError(500, "Firebase 서버 환경변수가 설정되지 않았습니다.");
+
+  return initializeApp({
+    credential: cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: String(process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n")
+    }),
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET
+  });
 }
 
-async function supabaseRequest(pathname, options = {}) {
-  if (process.env.VERCEL && !isSupabaseConfigured()) {
-    throw createError(500, "Supabase 서버 환경변수가 설정되지 않았습니다.");
+function firestoreDb() {
+  return getFirestore(getFirebaseApp());
+}
+
+function firebaseBucket() {
+  return getStorage(getFirebaseApp()).bucket();
+}
+
+async function signedFileUrl(filePath) {
+  if (!filePath) return null;
+  const [url] = await firebaseBucket()
+    .file(filePath)
+    .getSignedUrl({ action: "read", expires: Date.now() + 3600 * 1000 });
+  return url;
+}
+
+function docToRow(doc) {
+  return { id: doc.id, ...doc.data() };
+}
+
+async function deleteCollection(collectionRef, batchSize = 400) {
+  const snap = await collectionRef.get();
+  const cleared = snap.size;
+  for (let i = 0; i < snap.docs.length; i += batchSize) {
+    const batch = collectionRef.firestore.batch();
+    snap.docs.slice(i, i + batchSize).forEach((doc) => batch.delete(doc.ref));
+    await batch.commit();
   }
-
-  const response = await fetch(`${process.env.SUPABASE_URL}${pathname}`, {
-    ...options,
-    headers: supabaseHeaders(options.headers || {})
-  });
-  const contentType = response.headers.get("content-type") || "";
-  const payload = contentType.includes("application/json") ? await response.json() : await response.text();
-
-  if (!response.ok) {
-    const message = payload?.message || payload?.error || "Supabase 요청에 실패했습니다.";
-    throw createError(response.status, message);
-  }
-  return payload;
-}
-
-function restPath(table, params = {}) {
-  const search = new URLSearchParams({ select: "*", ...params });
-  return `/rest/v1/${table}?${search.toString()}`;
-}
-
-async function restInsert(table, payload) {
-  return supabaseRequest(`/rest/v1/${table}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      prefer: "return=representation"
-    },
-    body: JSON.stringify(payload)
-  });
-}
-
-async function restPatch(table, id, payload) {
-  return supabaseRequest(`/rest/v1/${table}?id=eq.${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    headers: {
-      "content-type": "application/json",
-      prefer: "return=representation"
-    },
-    body: JSON.stringify(payload)
-  });
-}
-
-async function restDelete(table, params = {}) {
-  const search = new URLSearchParams(params);
-  return supabaseRequest(`/rest/v1/${table}?${search.toString()}`, {
-    method: "DELETE",
-    headers: {
-      prefer: "return=representation"
-    }
-  });
+  return cleared;
 }
 
 function clampLimit(value, fallback, max = 500) {
@@ -528,13 +515,6 @@ function clampOffset(value) {
   const number = Number(value);
   if (!Number.isFinite(number) || number < 0) return 0;
   return Math.floor(number);
-}
-
-function encodePath(value) {
-  return String(value)
-    .split("/")
-    .map((part) => encodeURIComponent(part))
-    .join("/");
 }
 
 function safeFileName(name) {
@@ -607,111 +587,91 @@ function visibleComment(row) {
   return copy;
 }
 
-async function signedUploadUrl(filePath) {
-  if (!filePath) return null;
-  const payload = await supabaseRequest(
-    `/storage/v1/object/sign/${QUICK_BUCKET}/${encodePath(filePath)}`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ expiresIn: 3600 })
-    }
-  );
-  const signed = payload.signedURL || payload.signedUrl || "";
-  return signed.startsWith("http") ? signed : `${process.env.SUPABASE_URL}/storage/v1${signed}`;
-}
-
-const supabaseRepo = {
+const firebaseRepo = {
   async listStats(courseKeyValue) {
-    return supabaseRequest(
-      restPath("stat_reports", {
-        course_key: `eq.${courseKeyValue}`,
-        order: "year.desc,semester.desc,created_at.desc"
-      })
-    );
+    const snap = await firestoreDb()
+      .collection("stat_reports")
+      .where("course_key", "==", courseKeyValue)
+      .orderBy("year", "desc")
+      .orderBy("semester", "desc")
+      .orderBy("created_at", "desc")
+      .get();
+    return snap.docs.map(docToRow);
   },
 
   async listAllStats(limit = 200, offset = 0) {
-    return supabaseRequest(
-      restPath("stat_reports", {
-        order: "created_at.desc",
-        limit: String(limit),
-        offset: String(offset)
-      })
-    );
+    const snap = await firestoreDb()
+      .collection("stat_reports")
+      .orderBy("created_at", "desc")
+      .limit(offset + limit)
+      .get();
+    return snap.docs.map(docToRow).slice(offset);
   },
 
   async listLogs(limit = 200, offset = 0) {
-    return supabaseRequest(
-      restPath("activity_logs", {
-        order: "created_at.desc",
-        limit: String(limit),
-        offset: String(offset)
-      })
-    );
+    const snap = await firestoreDb()
+      .collection("activity_logs")
+      .orderBy("created_at", "desc")
+      .limit(offset + limit)
+      .get();
+    return snap.docs.map(docToRow).slice(offset);
   },
 
   async clearLogs() {
-    return restDelete("activity_logs", { id: "not.is.null" });
+    const cleared = await deleteCollection(firestoreDb().collection("activity_logs"));
+    return { cleared };
   },
 
   async courseActivity() {
-    const [stats, polls] = await Promise.all([
-      supabaseRequest(
-        restPath("stat_reports", {
-          select: "course_key,created_at",
-          order: "created_at.desc",
-          limit: "1000"
-        })
-      ),
-      supabaseRequest(
-        restPath("difficulty_polls", {
-          select: "course_key,closes_at",
-          closes_at: `gt.${new Date().toISOString()}`,
-          order: "closes_at.desc",
-          limit: "1000"
-        })
-      )
+    const db = firestoreDb();
+    const [statsSnap, pollsSnap] = await Promise.all([
+      db
+        .collection("stat_reports")
+        .select("course_key", "created_at")
+        .orderBy("created_at", "desc")
+        .limit(1000)
+        .get(),
+      db
+        .collection("difficulty_polls")
+        .select("course_key", "closes_at")
+        .where("closes_at", ">", new Date().toISOString())
+        .orderBy("closes_at", "desc")
+        .limit(1000)
+        .get()
     ]);
 
-    return summarizeActivity(stats, polls);
+    return summarizeActivity(
+      statsSnap.docs.map((doc) => doc.data()),
+      pollsSnap.docs.map((doc) => doc.data())
+    );
   },
 
   async listFavorites(user) {
-    const rows = await supabaseRequest(
-      restPath("course_favorites", {
-        user_email_hash: `eq.${user.emailHash}`,
-        order: "created_at.desc"
-      })
-    );
-    return rows.map(publicFavorite);
+    const snap = await firestoreDb()
+      .collection("course_favorites")
+      .where("user_email_hash", "==", user.emailHash)
+      .orderBy("created_at", "desc")
+      .get();
+    return snap.docs.map(docToRow).map(publicFavorite);
   },
 
   async setFavorite(user, course, favorite) {
+    const ref = firestoreDb().collection("course_favorites").doc(`${user.emailHash}_${course.course_key}`);
     if (!favorite) {
-      await restDelete("course_favorites", {
-        user_email_hash: `eq.${user.emailHash}`,
-        course_key: `eq.${course.course_key}`
-      });
+      await ref.delete();
       return this.listFavorites(user);
     }
 
-    const existing = await supabaseRequest(
-      restPath("course_favorites", {
-        user_email_hash: `eq.${user.emailHash}`,
-        course_key: `eq.${course.course_key}`,
-        limit: "1"
-      })
-    );
-
-    if (!existing.length) {
-      await restInsert("course_favorites", {
+    const existing = await ref.get();
+    if (!existing.exists) {
+      await ref.set({
         user_email_hash: user.emailHash,
         course_key: course.course_key,
         course_id: course.course_id,
         course_title: course.course_title,
         instructor: course.instructor,
-        department: course.department
+        department: course.department,
+        created_at: new Date().toISOString()
       });
     }
 
@@ -719,76 +679,85 @@ const supabaseRepo = {
   },
 
   async insertStat(payload) {
-    const rows = await restInsert("stat_reports", payload);
-    return rows[0];
+    const ref = firestoreDb().collection("stat_reports").doc();
+    const row = { ...payload, created_at: new Date().toISOString() };
+    await ref.set(row);
+    return { id: ref.id, ...row };
   },
 
   async insertLog(payload) {
-    const rows = await restInsert("activity_logs", payload);
-    return rows[0];
+    const ref = firestoreDb().collection("activity_logs").doc();
+    const row = { ...payload, created_at: new Date().toISOString() };
+    await ref.set(row);
+    return { id: ref.id, ...row };
   },
 
   async updateStat(id, payload) {
-    const rows = await restPatch("stat_reports", id, payload);
-    return rows[0];
+    const ref = firestoreDb().collection("stat_reports").doc(id);
+    const existing = await ref.get();
+    if (!existing.exists) throw createError(404, "통계량을 찾을 수 없습니다.");
+    const updates = { ...payload, updated_at: new Date().toISOString() };
+    await ref.update(updates);
+    return { id, ...existing.data(), ...updates };
   },
 
   async createQuickReport(payload, upload) {
-    const objectPath = `${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${upload.fileName}`;
-    await supabaseRequest(`/storage/v1/object/${QUICK_BUCKET}/${encodePath(objectPath)}`, {
-      method: "POST",
-      headers: {
-        "content-type": upload.contentType,
-        "cache-control": "3600",
-        "x-upsert": "false"
-      },
-      body: upload.buffer
-    });
+    const objectPath = `${QUICK_REPORTS_PREFIX}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${upload.fileName}`;
+    await firebaseBucket()
+      .file(objectPath)
+      .save(upload.buffer, { resumable: false, metadata: { contentType: upload.contentType } });
 
-    const rows = await restInsert("quick_reports", {
+    const ref = firestoreDb().collection("quick_reports").doc();
+    const row = {
       ...payload,
       file_path: objectPath,
       file_name: upload.fileName,
       content_type: upload.contentType,
-      status: "pending"
-    });
-    return visibleQuickReport(rows[0]);
+      status: "pending",
+      created_at: new Date().toISOString()
+    };
+    await ref.set(row);
+    return visibleQuickReport({ id: ref.id, ...row });
   },
 
   async listQuickReports({ status = "pending", courseKeyValue = "", limit = 10, offset = 0 } = {}) {
-    const params = { order: "created_at.desc", limit: String(limit), offset: String(offset) };
-    if (status && status !== "all") params.status = `eq.${status}`;
-    if (courseKeyValue) params.course_key = `eq.${courseKeyValue}`;
-    const rows = await supabaseRequest(restPath("quick_reports", params));
+    let query = firestoreDb().collection("quick_reports");
+    if (status && status !== "all") query = query.where("status", "==", status);
+    if (courseKeyValue) query = query.where("course_key", "==", courseKeyValue);
+    query = query.orderBy("created_at", "desc").limit(offset + limit);
+
+    const snap = await query.get();
+    const rows = snap.docs.map(docToRow).slice(offset);
 
     return Promise.all(
       rows.map(async (row) =>
         visibleQuickReport({
           ...row,
-          file_url: await signedUploadUrl(row.file_path)
+          file_url: await signedFileUrl(row.file_path)
         })
       )
     );
   },
 
   async updateQuickReport(id, payload) {
-    const rows = await restPatch("quick_reports", id, payload);
-    return visibleQuickReport(rows[0]);
+    const ref = firestoreDb().collection("quick_reports").doc(id);
+    const existing = await ref.get();
+    if (!existing.exists) throw createError(404, "간편 제보를 찾을 수 없습니다.");
+    const updates = { ...payload, reviewed_at: new Date().toISOString() };
+    await ref.update(updates);
+    return visibleQuickReport({ id, ...existing.data(), ...updates });
   },
 
   async activePoll(courseKeyValue, assessmentLabel = "") {
-    const params = {
-      course_key: `eq.${courseKeyValue}`,
-      closes_at: `gt.${new Date().toISOString()}`,
-      order: "closes_at.desc",
-      limit: "1"
-    };
-    if (assessmentLabel) params.assessment_label = `eq.${normalizeAssessment(assessmentLabel)}`;
+    let query = firestoreDb()
+      .collection("difficulty_polls")
+      .where("course_key", "==", courseKeyValue)
+      .where("closes_at", ">", new Date().toISOString());
+    if (assessmentLabel) query = query.where("assessment_label", "==", normalizeAssessment(assessmentLabel));
+    query = query.orderBy("closes_at", "desc").limit(1);
 
-    const rows = await supabaseRequest(
-      restPath("difficulty_polls", params)
-    );
-    return rows[0] || null;
+    const snap = await query.get();
+    return snap.empty ? null : docToRow(snap.docs[0]);
   },
 
   async createPoll(course, user, assessmentLabel = "기타") {
@@ -797,61 +766,59 @@ const supabaseRepo = {
     if (active) return active;
 
     const openedAt = new Date();
-    const rows = await restInsert("difficulty_polls", {
+    const ref = firestoreDb().collection("difficulty_polls").doc();
+    const row = {
       ...course,
       assessment_label: normalizedAssessment,
       opened_by_hash: user.emailHash,
       opened_at: openedAt.toISOString(),
       closes_at: new Date(openedAt.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
-    });
-    return rows[0];
+    };
+    await ref.set(row);
+    return { id: ref.id, ...row };
   },
 
   async votesForPoll(pollId) {
-    return supabaseRequest(
-      restPath("difficulty_votes", {
-        poll_id: `eq.${pollId}`,
-        order: "created_at.asc"
-      })
-    );
+    const snap = await firestoreDb()
+      .collection("difficulty_votes")
+      .where("poll_id", "==", pollId)
+      .orderBy("created_at", "asc")
+      .get();
+    return snap.docs.map(docToRow);
   },
 
   async votesForCourseAssessment(courseKeyValue, assessmentLabel) {
-    return supabaseRequest(
-      restPath("difficulty_votes", {
-        course_key: `eq.${courseKeyValue}`,
-        assessment_label: `eq.${normalizeAssessment(assessmentLabel)}`,
-        order: "created_at.asc"
-      })
-    );
+    const snap = await firestoreDb()
+      .collection("difficulty_votes")
+      .where("course_key", "==", courseKeyValue)
+      .where("assessment_label", "==", normalizeAssessment(assessmentLabel))
+      .orderBy("created_at", "asc")
+      .get();
+    return snap.docs.map(docToRow);
   },
 
   async voteWindowCount(user) {
-    const rows = await supabaseRequest(
-      restPath("difficulty_votes", {
-        voter_email_hash: `eq.${user.emailHash}`,
-        created_at: `gte.${voteWindowStartIso()}`
-      })
-    );
-    return rows.length;
+    const snap = await firestoreDb()
+      .collection("difficulty_votes")
+      .where("voter_email_hash", "==", user.emailHash)
+      .where("created_at", ">=", voteWindowStartIso())
+      .get();
+    return snap.size;
   },
 
   async insertVote(poll, user, rating, tags) {
-    const existing = (await this.votesForPoll(poll.id)).find(
-      (vote) => vote.voter_email_hash === user.emailHash
-    );
-    if (existing) {
-      const rows = await restPatch("difficulty_votes", existing.id, {
-        rating,
-        difficulty_tags: tags.join(",")
-      });
-      return rows[0];
+    const ref = firestoreDb().collection("difficulty_votes").doc(`${poll.id}_${user.emailHash}`);
+    const existing = await ref.get();
+    if (existing.exists) {
+      const updates = { rating, difficulty_tags: tags.join(",") };
+      await ref.update(updates);
+      return { id: ref.id, ...existing.data(), ...updates };
     }
 
     const voteCount = await this.voteWindowCount(user);
     if (voteCount >= VOTE_LIMIT) throw createError(429, `이번 시험 기간 투표 가능 횟수 ${VOTE_LIMIT}회를 모두 사용했습니다.`);
 
-    const rows = await restInsert("difficulty_votes", {
+    const row = {
       poll_id: poll.id,
       course_key: poll.course_key,
       course_id: poll.course_id,
@@ -860,64 +827,70 @@ const supabaseRepo = {
       semester: poll.semester,
       voter_email_hash: user.emailHash,
       rating,
-      difficulty_tags: tags.join(",")
-    });
-    return rows[0];
+      difficulty_tags: tags.join(","),
+      created_at: new Date().toISOString()
+    };
+    await ref.set(row);
+    return { id: ref.id, ...row };
   },
 
   async listComments(courseKeyValue, limit = 50, offset = 0) {
-    return supabaseRequest(
-      restPath("course_comments", {
-        course_key: `eq.${courseKeyValue}`,
-        order: "created_at.desc",
-        limit: String(limit),
-        offset: String(offset)
-      })
-    );
+    const snap = await firestoreDb()
+      .collection("course_comments")
+      .where("course_key", "==", courseKeyValue)
+      .orderBy("created_at", "desc")
+      .limit(offset + limit)
+      .get();
+    return snap.docs.map(docToRow).slice(offset);
   },
 
   async insertComment(payload) {
-    const rows = await restInsert("course_comments", payload);
-    return rows[0];
+    const ref = firestoreDb().collection("course_comments").doc();
+    const row = { ...payload, created_at: new Date().toISOString() };
+    await ref.set(row);
+    return { id: ref.id, ...row };
   },
 
   async deleteComment(id) {
-    return restDelete("course_comments", { id: `eq.${id}` });
+    await firestoreDb().collection("course_comments").doc(id).delete();
+    return { deleted: true };
   },
 
   async getUserProfile(user) {
-    const rows = await supabaseRequest(
-      restPath("user_profiles", { user_email_hash: `eq.${user.emailHash}`, limit: "1" })
-    );
-    return rows[0] || null;
+    const doc = await firestoreDb().collection("user_profiles").doc(user.emailHash).get();
+    return doc.exists ? docToRow(doc) : null;
   },
 
   async upsertUserProfile(user, payload, ip) {
-    const existing = await this.getUserProfile(user);
+    const ref = firestoreDb().collection("user_profiles").doc(user.emailHash);
+    const existing = await ref.get();
     const data = {
       college: payload.college,
       admission_year: payload.admissionYear,
       last_ip: ip || null
     };
 
-    if (existing) {
-      const rows = await restPatch("user_profiles", existing.id, data);
-      return rows[0];
+    if (existing.exists) {
+      const updates = { ...data, updated_at: new Date().toISOString() };
+      await ref.update(updates);
+      return { id: ref.id, ...existing.data(), ...updates };
     }
 
-    const rows = await restInsert("user_profiles", {
-      user_email_hash: user.emailHash,
-      ...data
-    });
-    return rows[0];
+    const row = { user_email_hash: user.emailHash, ...data, created_at: new Date().toISOString() };
+    await ref.set(row);
+    return { id: ref.id, ...row };
   },
 
   async collegeStats() {
-    const [profiles, loginRows] = await Promise.all([
-      supabaseRequest(restPath("user_profiles", { select: "college,admission_year", limit: "5000" })),
-      supabaseRequest(restPath("activity_logs", { select: "user_email", action: "eq.login", limit: "5000" }))
+    const db = firestoreDb();
+    const [profilesSnap, loginSnap] = await Promise.all([
+      db.collection("user_profiles").select("college", "admission_year").limit(5000).get(),
+      db.collection("activity_logs").where("action", "==", "login").select("user_email").limit(5000).get()
     ]);
-    return summarizeCollegeStats(profiles, loginRows);
+    return summarizeCollegeStats(
+      profilesSnap.docs.map((doc) => doc.data()),
+      loginSnap.docs.map((doc) => doc.data())
+    );
   }
 };
 
@@ -1205,7 +1178,7 @@ const localRepo = {
 };
 
 function repo() {
-  return isSupabaseConfigured() ? supabaseRepo : localRepo;
+  return isFirebaseConfigured() ? firebaseRepo : localRepo;
 }
 
 async function recordAction(user, action, metadata = {}) {
@@ -1327,8 +1300,8 @@ module.exports = {
   guessAdmissionYearFromEmail,
   handleError,
   isDemoAuthAllowed,
+  isFirebaseConfigured,
   isGoogleAuthConfigured,
-  isSupabaseConfigured,
   maskDisplayName,
   method,
   clampLimit,

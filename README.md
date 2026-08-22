@@ -18,8 +18,8 @@ SNU Archive는 서울대학교 강의 통계량과 난이도 투표를 모아 �
 
 - Frontend: 정적 HTML/CSS/JavaScript (`public/`)
 - API: Vercel Serverless Functions 호환 Node.js 핸들러 (`api/`)
-- Local DB: Supabase 미설정 시 `.local-data/db.json`에 저장됩니다.
-- Production DB/Storage: Supabase Postgres + private Storage bucket
+- Local DB: Firebase 미설정 시 `.local-data/db.json`에 저장됩니다.
+- Production DB/Storage: Firebase Firestore + private Cloud Storage 버킷 (`firebase-admin` SDK로 서버에서만 접근)
 - Course build script: 원본 학기 JSON을 `public/courses.json`으로 변환합니다.
 
 ## 로컬 실행
@@ -44,8 +44,10 @@ npm run dev
 GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+FIREBASE_PROJECT_ID=your-firebase-project-id
+FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@your-firebase-project-id.iam.gserviceaccount.com
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+FIREBASE_STORAGE_BUCKET=your-firebase-project-id.appspot.com
 
 ADMIN_EMAILS=admin@snu.ac.kr,coshaman@snu.ac.kr
 AUTH_SESSION_SECRET=change-this-random-session-secret
@@ -54,7 +56,9 @@ ALLOW_DEMO_AUTH=false
 APP_ORIGIN=http://localhost:3000
 ```
 
-`GOOGLE_CLIENT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `AUTH_SESSION_SECRET`, `EMAIL_HASH_SECRET`는 서버에서만 사용해야 합니다. 브라우저 코드나 README에 실제 값을 적지 마세요.
+`GOOGLE_CLIENT_SECRET`, `FIREBASE_PRIVATE_KEY`, `AUTH_SESSION_SECRET`, `EMAIL_HASH_SECRET`는 서버에서만 사용해야 합니다. 브라우저 코드나 README에 실제 값을 적지 마세요.
+
+`FIREBASE_PROJECT_ID`/`FIREBASE_CLIENT_EMAIL`/`FIREBASE_PRIVATE_KEY`는 Firebase 서비스 계정 JSON의 `project_id`/`client_email`/`private_key` 값을 그대로 옮기면 됩니다. Vercel 환경변수 입력창에 `private_key` 값을 붙여넣을 때 줄바꿈이 `\n` 문자열로 남아 있어도 서버 코드가 자동으로 변환하니 그대로 붙여넣으면 됩니다.
 
 ## Google OAuth 설정
 
@@ -70,21 +74,37 @@ https://your-domain.example/api/auth/google/callback
 
 Vercel 배포 환경에서는 `APP_ORIGIN`을 실제 서비스 주소로 설정해야 callback URL이 올바르게 만들어집니다.
 
-## Supabase 설정
+## Firebase 설정
 
-운영 배포에서는 Supabase 프로젝트를 만들고 SQL Editor에서 `supabase/schema.sql`을 실행합니다.
+운영 배포에서는 Firebase 프로젝트를 만들고 다음을 준비합니다.
 
-이 스키마는 다음을 만듭니다.
+1. [Firebase Console](https://console.firebase.google.com)에서 프로젝트 생성
+2. **Firestore Database** 사용 설정 (Native mode)
+3. **Storage** 사용 설정 (간편 제보 파일 저장용 기본 버킷)
+4. **프로젝트 설정 → 서비스 계정 → 새 비공개 키 생성**으로 서비스 계정 JSON 다운로드 → `FIREBASE_PROJECT_ID`/`FIREBASE_CLIENT_EMAIL`/`FIREBASE_PRIVATE_KEY` 값으로 사용
+5. 저장소 루트의 보안 규칙/인덱스 배포:
+
+```powershell
+npm install -g firebase-tools
+firebase login
+firebase use --add
+firebase deploy --only firestore:rules,firestore:indexes,storage:rules
+```
+
+앱은 다음 Firestore 컬렉션을 사용합니다.
 
 - `stat_reports`: 직접 제보와 승인된 통계량
 - `quick_reports`: 간편 제보 큐
-- `course_favorites`: 사용자별 즐겨찾기
+- `course_favorites`: 사용자별 즐겨찾기 (문서 ID: `{이메일해시}_{course_key}`)
 - `difficulty_polls`: 난이도 투표 개설 정보
-- `difficulty_votes`: 난이도 투표 응답
+- `difficulty_votes`: 난이도 투표 응답 (문서 ID: `{poll_id}_{이메일해시}`)
+- `course_comments`: 한줄 후기
 - `activity_logs`: 로그인, 제보, 투표, 관리자 작업 로그
-- `quick-reports`: 간편 제보 파일용 private Storage bucket
+- `user_profiles`: 단과대학/입학년도 통계 (문서 ID: 이메일 해시)
 
-Supabase를 설정하지 않은 로컬 실행에서는 `.local-data/`에 테스트 데이터가 저장됩니다. 이 폴더는 커밋하지 않습니다.
+간편 제보 파일은 Storage 버킷의 `quick-reports/` 하위에 저장되고, 서버가 매번 만료 1시간짜리 서명된 URL로만 접근합니다. `firestore.rules`/`storage.rules`는 모든 직접 접근을 차단하며, 서버는 `firebase-admin` SDK(서비스 계정)로만 접근해 규칙을 우회합니다.
+
+Firebase를 설정하지 않은 로컬 실행에서는 `.local-data/`에 테스트 데이터가 저장됩니다. 이 폴더는 커밋하지 않습니다.
 
 ## Vercel 배포
 
